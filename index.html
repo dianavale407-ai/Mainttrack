@@ -1,0 +1,420 @@
+<!DOCTYPE html> 
+<html>
+<head>
+<title>MaintTrack System</title>
+
+<style>
+body{margin:0;font-family:Arial;background:#f4f6f8}
+.sidebar{
+    position:fixed;left:0;top:0;width:220px;height:100%;
+    background:#2c3e50;color:white;padding:10px
+}
+.sidebar button{
+    width:100%;margin:5px 0;padding:10px;
+    background:#34495e;color:white;border:none;cursor:pointer
+}
+.sidebar button:hover{background:#1abc9c}
+.content{margin-left:240px;padding:20px}
+.section{display:none}
+input, select{margin:5px;padding:8px}
+table{border-collapse:collapse;width:100%;margin-top:10px}
+table,th,td{border:1px solid #ccc;padding:8px;text-align:center}
+h2{margin-top:20px}
+</style>
+
+</head>
+
+<body>
+
+<div class="sidebar">
+<h2>MaintTrack</h2>
+
+<button onclick="showSection('home')">Home</button>
+<button onclick="showSection('update')">Lubrication Update</button>
+<button onclick="showSection('history')">Consumption History</button>
+<button onclick="showSection('report')">Consumption Report</button>
+<button onclick="showSection('fleetreport')">Fleet Consumption Report</button>
+
+<button onclick="exportBackup()">Export Backup</button>
+<button onclick="document.getElementById('importFile').click()">Import Backup</button>
+<input type="file" id="importFile" style="display:none" onchange="importBackup(event)">
+
+</div>
+
+<div class="content">
+
+<!-- HOME -->
+<div id="home" class="section" style="display:block">
+<h2>Welcome</h2>
+</div>
+
+<!-- UPDATE -->
+<div id="update" class="section">
+<h2>Lubrication Update</h2>
+
+<input id="d_date" type="date">
+<input id="d_fleet" placeholder="Fleet No">
+
+<select id="d_equipType">
+<option value="">Equipment Type</option>
+<option value="Excavator">Excavator</option>
+<option value="Dozer">Dozer</option>
+<option value="Grader">Grader</option>
+<option value="Loader">Loader</option>
+<option value="Truck">Truck</option>
+<option value="Other">Other</option>
+</select>
+
+<input id="d_customType" placeholder="If Other, type here">
+<input id="d_component" placeholder="Component">
+<input id="d_lubricant" placeholder="Lubricant">
+
+<select id="d_reason">
+<option value="Top Up">Top Up</option>
+<option value="BD">BD</option>
+<option value="Service">Service</option>
+</select>
+
+<input id="d_hours" type="number" placeholder="Service Hours">
+<input id="d_qty" type="number" placeholder="Qty Used">
+<input id="d_tech" placeholder="Technician">
+<input id="d_comment" placeholder="Comment">
+
+<button onclick="saveLubDone()">Save</button>
+</div>
+
+<!-- HISTORY -->
+<div id="history" class="section">
+<h2>Consumption History</h2>
+
+<input id="f_from" type="date">
+<input id="f_to" type="date">
+<input id="f_fleet" placeholder="Fleet">
+<input id="f_lubricant" placeholder="Lubricant">
+<input id="f_tech" placeholder="Technician">
+<input id="f_type" placeholder="Equipment Type">
+
+<button onclick="renderHistory()">Apply Filter</button>
+<button onclick="exportExcel()">Export Excel</button>
+
+<table id="historyTable">
+<thead>
+<tr>
+<th>Date</th>
+<th>Fleet</th>
+<th>Type</th>
+<th>Component</th>
+<th>Lubricant</th>
+<th>Reason</th>
+<th>Hours</th>
+<th>Interval</th>
+<th>Qty</th>
+<th>Tech</th>
+<th>Comment</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody></tbody>
+</table>
+</div>
+
+<!-- REPORT -->
+<div id="report" class="section">
+<h2>Lubricant Consumption Report</h2>
+
+<input id="r_from" type="date">
+<input id="r_to" type="date">
+
+<button onclick="generateReport()">Generate Report</button>
+<button onclick="exportReportExcel()">Export Excel</button>
+<button onclick="exportReportPDF()">Export PDF</button>
+
+<table id="reportTable">
+<thead>
+<tr>
+<th>Lubricant</th>
+<th>Total Used</th>
+</tr>
+</thead>
+<tbody></tbody>
+</table>
+</div>
+
+<!-- FLEET REPORT -->
+<div id="fleetreport" class="section">
+<h2>Fleet Consumption Report</h2>
+
+<input id="fr_from" type="date">
+<input id="fr_to" type="date">
+
+<!-- ✅ ADDED FILTERS -->
+<input id="fr_fleet" placeholder="Fleet Filter">
+<input id="fr_type" placeholder="Equipment Type Filter">
+
+<button onclick="generateFleetReport()">Generate Report</button>
+<button onclick="exportFleetExcel()">Export Excel</button>
+<button onclick="exportFleetPDF()">Export PDF</button>
+
+<table id="fleetTable">
+<thead>
+<tr>
+<th>Fleet</th>
+<th>Total Used</th>
+</tr>
+</thead>
+<tbody></tbody>
+</table>
+
+<h4 id="fleetTotal"></h4>
+</div>
+
+</div>
+
+<script>
+
+// NAV
+function showSection(id){
+document.querySelectorAll(".section").forEach(s=>s.style.display="none");
+document.getElementById(id).style.display="block";
+}
+
+// DATA
+let lubricationDone = JSON.parse(localStorage.getItem("lubDone")) || [];
+let editIndex = null;
+
+function saveData(){
+localStorage.setItem("lubDone", JSON.stringify(lubricationDone));
+}
+
+// SAVE
+function saveLubDone(){
+let fleet = d_fleet.value;
+let hours = Number(d_hours.value);
+
+let history = lubricationDone.filter(d => d.fleet === fleet);
+
+if(editIndex !== null){
+history = history.filter((_, i) => i !== editIndex);
+}
+
+let previous = history
+.filter(d => d.hours < hours)
+.sort((a,b)=> b.hours - a.hours)[0];
+
+let interval = previous ? (hours - previous.hours) : "";
+
+let finalType = d_equipType.value === "Other" ? d_customType.value : d_equipType.value;
+
+let done = {
+date: d_date.value,
+fleet,
+equipType: finalType,
+component: d_component.value,
+lubricant: d_lubricant.value,
+reason: d_reason.value,
+hours,
+interval,
+qty: Number(d_qty.value),
+tech: d_tech.value,
+comment: d_comment.value
+};
+
+if(editIndex !== null){
+lubricationDone[editIndex] = done;
+editIndex = null;
+} else {
+lubricationDone.push(done);
+}
+
+saveData();
+renderHistory();
+}
+
+// EDIT
+function editRecord(i){
+let d = lubricationDone[i];
+
+d_date.value = d.date;
+d_fleet.value = d.fleet;
+
+let types = ["Excavator","Dozer","Grader","Loader","Truck"];
+if(types.includes(d.equipType)){
+d_equipType.value = d.equipType;
+d_customType.value = "";
+} else {
+d_equipType.value = "Other";
+d_customType.value = d.equipType;
+}
+
+d_component.value = d.component;
+d_lubricant.value = d.lubricant;
+d_reason.value = d.reason;
+d_hours.value = d.hours;
+d_qty.value = d.qty;
+d_tech.value = d.tech;
+d_comment.value = d.comment;
+
+editIndex = i;
+showSection("update");
+}
+
+// DELETE
+function deleteRecord(i){
+if(confirm("Delete?")){
+lubricationDone.splice(i,1);
+saveData();
+renderHistory();
+}
+}
+
+// HISTORY
+function renderHistory(){
+let tbody = document.querySelector("#historyTable tbody");
+tbody.innerHTML = "";
+
+let from = f_from.value ? new Date(f_from.value) : null;
+let to = f_to.value ? new Date(f_to.value) : null;
+
+let fleetF = f_fleet.value.toLowerCase();
+let lubF = f_lubricant.value.toLowerCase();
+let techF = f_tech.value.toLowerCase();
+let typeF = f_type.value.toLowerCase();
+
+let data = [...lubricationDone].sort((a,b)=> new Date(b.date)-new Date(a.date));
+
+data.forEach((d)=>{
+let index = lubricationDone.indexOf(d);
+let date = new Date(d.date);
+
+if(from && date < from) return;
+if(to && date > to) return;
+if(fleetF && !d.fleet.toLowerCase().includes(fleetF)) return;
+if(lubF && !d.lubricant.toLowerCase().includes(lubF)) return;
+if(techF && !d.tech.toLowerCase().includes(techF)) return;
+if(typeF && !(d.equipType || "").toLowerCase().includes(typeF)) return;
+
+tbody.innerHTML += `<tr>
+<td>${d.date}</td>
+<td>${d.fleet}</td>
+<td>${d.equipType || ""}</td>
+<td>${d.component}</td>
+<td>${d.lubricant}</td>
+<td>${d.reason}</td>
+<td>${d.hours}</td>
+<td>${d.interval}</td>
+<td>${d.qty}</td>
+<td>${d.tech}</td>
+<td>${d.comment || ""}</td>
+<td>
+<button onclick="editRecord(${index})">Edit</button>
+<button onclick="deleteRecord(${index})">Delete</button>
+</td>
+</tr>`;
+});
+}
+
+// REPORT
+function generateReport(){
+let tbody = document.querySelector("#reportTable tbody");
+tbody.innerHTML = "";
+
+let from = r_from.value ? new Date(r_from.value) : null;
+let to = r_to.value ? new Date(r_to.value) : null;
+
+let summary = {};
+let total = 0;
+
+lubricationDone.forEach(d=>{
+let date = new Date(d.date);
+if(from && date < from) return;
+if(to && date > to) return;
+
+summary[d.lubricant] = (summary[d.lubricant] || 0) + d.qty;
+total += d.qty;
+});
+
+for(let lub in summary){
+tbody.innerHTML += `<tr>
+<td>${lub}</td>
+<td>${summary[lub]}</td>
+</tr>`;
+}
+
+tbody.innerHTML += `<tr style="font-weight:bold">
+<td>TOTAL</td>
+<td>${total}</td>
+</tr>`;
+}
+
+// FLEET REPORT (UPDATED ONLY HERE)
+function generateFleetReport(){
+let tbody = document.querySelector("#fleetTable tbody");
+tbody.innerHTML = "";
+
+let from = fr_from.value ? new Date(fr_from.value) : null;
+let to = fr_to.value ? new Date(fr_to.value) : null;
+
+let fleetF = (fr_fleet.value || "").toLowerCase();
+let typeF = (fr_type.value || "").toLowerCase();
+
+let summary = {};
+let total = 0;
+
+lubricationDone.forEach(d=>{
+let date = new Date(d.date);
+
+if(from && date < from) return;
+if(to && date > to) return;
+if(fleetF && !d.fleet.toLowerCase().includes(fleetF)) return;
+if(typeF && !(d.equipType || "").toLowerCase().includes(typeF)) return;
+
+summary[d.fleet] = (summary[d.fleet] || 0) + d.qty;
+total += d.qty;
+});
+
+for(let f in summary){
+tbody.innerHTML += `<tr>
+<td>${f}</td>
+<td>${summary[f]}</td>
+</tr>`;
+}
+
+document.getElementById("fleetTotal").innerText = "Total: " + total;
+}
+
+// BACKUP
+function exportBackup(){
+let dataStr = JSON.stringify(lubricationDone, null, 2);
+let blob = new Blob([dataStr], {type:"application/json"});
+let url = URL.createObjectURL(blob);
+let a = document.createElement("a");
+a.href = url;
+a.download = "MaintTrack_Backup.json";
+a.click();
+}
+
+function importBackup(event){
+let file = event.target.files[0];
+if(!file) return;
+
+let reader = new FileReader();
+reader.onload = function(e){
+try{
+lubricationDone = JSON.parse(e.target.result);
+saveData();
+renderHistory();
+alert("Backup restored successfully!");
+} catch(err){
+alert("Invalid backup file");
+}
+};
+reader.readAsText(file);
+}
+
+// INIT
+renderHistory();
+
+</script>
+
+</body>
+</html>
